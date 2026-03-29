@@ -1,49 +1,71 @@
-import dotenv from "dotenv";
-import path from "path";
-
-// 🔥 Load environment variables (VERY IMPORTANT)
-dotenv.config({
-  path: path.resolve(process.cwd(), ".env"),
-});
-
 import { Worker } from "bullmq";
 import redisConnection from "../config/redis.js";
-import { sendEmail } from "../services/email.service.js";
+import { handleNotification } from "../services/notificationRouter.service.js";
+import Notification from "../models/notification.model.js";
+import { failedQueue } from "../queues/failed.queue.js";
+import db_connect from "../config/db.js";
+import dotenv from "dotenv";
 
-// 🔥 Create worker
+dotenv.config();
+db_connect();
+
 const worker = new Worker(
   "notificationQueue",
   async (job) => {
+    console.log("Job received:", job.id, job.data);
+
+    await Notification.findOneAndUpdate(
+      { jobId: job.id },
+      { status: "processing" }
+    );
+
     try {
-      const { email, subject, message } = job.data;
+      await handleNotification(job.data);
 
-      console.log("Processing job:", job.id);
+      console.log("Notification sent");
 
-      // Call email service
-      await sendEmail(email, subject, message);
+      await Notification.findOneAndUpdate(
+        { jobId: job.id },
+        { status: "sent" }
+      );
+    } catch (err) {
+      console.log("Error:", err.message);
 
-      console.log(`Email sent to ${email}`);
-    } catch (error) {
-      console.error("Error processing job:", error.message);
-      throw error; // Important for BullMQ to mark job as failed
+      await Notification.findOneAndUpdate(
+        { jobId: job.id },
+        {
+          status: "failed",
+          error: err.message,
+          attempts: job.attemptsMade,
+        }
+      );
+
+      if (job.attemptsMade >= 3) {
+        await failedQueue.add("dead", job.data);
+      }
+
+      throw err;
     }
   },
   {
     connection: redisConnection,
+    concurrency: 5,
+
+    limiter: {
+      max: 10,
+      duration: 1000,
+    },
   }
 );
 
-// ✅ Success event
 worker.on("completed", (job) => {
   console.log(`Job ${job.id} completed`);
 });
 
-// ❌ Failure event
 worker.on("failed", (job, err) => {
   console.log(`Job ${job?.id} failed: ${err.message}`);
 });
 
-// Optional: log worker errors
 worker.on("error", (err) => {
   console.error("Worker error:", err);
 });
