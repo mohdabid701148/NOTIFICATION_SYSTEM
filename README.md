@@ -75,7 +75,7 @@ src/
 ### 1. Clone the repository
 
 ```
-git clone <your-repo-url>
+git clone https://github.com/mohdabid701148/NOTIFICATION_SYSTEM
 cd notification-system/backend
 ```
 
