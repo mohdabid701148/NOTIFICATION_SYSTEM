@@ -126,7 +126,7 @@ npm run worker
 ### Send Notification
 
 ```
-POST /api/notify/send
+POST /api
 ```
 
 #### Request Body
